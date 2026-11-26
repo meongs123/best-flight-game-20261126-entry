@@ -813,8 +813,16 @@ export function createGame(canvas) {
       G.mode = 'takeoff'; G.takeoffT = 0.3; G.lift = 2;
       G.scrollY = -665; G.scrollSpeed = 90; G.scrollTarget = 150;
       player.x = W() / 2; player.y = H() - BOT_H - 140;
-      // Slight left bank onto runway heading: true heading 292.
-      player.vx = -200; player.vy = -80; player.bank = -0.51;
+      // Nose-coherent (fix pass 2, Red Team C1): velocity straight
+      // up-screen (north), HDG ~004, matching the north-pointing nose
+      // on runway 07. (Was vx -200 / vy -80 -> HDG 292, disagreeing
+      // with both the nose and the runway.)
+      player.vx = 15; player.vy = -200; player.bank = 0.04;
+      // Nudge the plane further up the runway (cheap thumbnail
+      // insurance): shift the runway island 60 px south in world-y so
+      // the plane sits nearer the north end of the strip at capture.
+      // takeoffT stays 0.3 so ALT still reads 0 at capture.
+      world.features.find((f) => f.kind === 'runway').wy += 60;
       // Fill the empty water: widen the runway landmass on both shoulders,
       // plus islands + clouds (with shadows) in the upper frame.
       addIsland(world, W() / 2 - 175, -170, 90);
