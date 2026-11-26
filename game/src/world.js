@@ -2,8 +2,8 @@
 // the runway island, all scrolling downward. Deterministic from a seeded RNG.
 import { mulberry32, clamp, TAU } from './rng.js';
 
-const SEA_DEEP = '#0b5e7a';
-const SEA_SHALLOW = '#128a9c';
+const SEA_DEEP = '#0c5a70';
+const SEA_SHALLOW = '#178f88';
 const SAND = '#d9b380';
 const GRASS = '#4d8a3f';
 const FOREST = '#2f6b2e';
@@ -155,14 +155,19 @@ function drawRunway(ctx, f, sy) {
 
 function drawCloud(ctx, f, sy, t) {
   ctx.save();
+  // Soft shadow cast on the water below the cloud (sun low, upper right).
+  ctx.fillStyle = 'rgba(10,35,45,0.20)';
+  for (const p of f.puffs) {
+    ctx.beginPath(); ctx.ellipse(f.x + p.dx - 26, sy + p.dy + 38, p.r * 1.05, p.r * 0.5, 0, 0, TAU); ctx.fill();
+  }
   ctx.globalAlpha = f.alpha * 0.9;
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = '#fff6e0';
   for (const p of f.puffs) {
     ctx.beginPath(); ctx.ellipse(f.x + p.dx, sy + p.dy, p.r, p.r * 0.55, 0, 0, TAU); ctx.fill();
   }
-  // Soft grey underside.
-  ctx.globalAlpha = f.alpha * 0.25;
-  ctx.fillStyle = '#8aa0b8';
+  // Warm golden-hour underside.
+  ctx.globalAlpha = f.alpha * 0.30;
+  ctx.fillStyle = '#c98d5a';
   for (const p of f.puffs) {
     ctx.beginPath(); ctx.ellipse(f.x + p.dx, sy + p.dy + p.r * 0.3, p.r * 0.9, p.r * 0.3, 0, 0, TAU); ctx.fill();
   }
@@ -177,6 +182,12 @@ export function drawWorld(ctx, world, scrollY, W, H, topH, t) {
   g.addColorStop(0.5, SEA_SHALLOW);
   g.addColorStop(1, SEA_DEEP);
   ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // Golden-hour sun glow over the sea (upper right, low sun).
+  const sun = ctx.createRadialGradient(W * 0.85, 20, 20, W * 0.85, 20, 560);
+  sun.addColorStop(0, 'rgba(255,200,110,0.28)');
+  sun.addColorStop(1, 'rgba(255,200,110,0)');
+  ctx.fillStyle = sun;
   ctx.fillRect(0, 0, W, H);
   // Moving swell lines (drift downward with the scroll).
   ctx.strokeStyle = 'rgba(255,255,255,0.07)';

@@ -16,6 +16,8 @@ export function drawPlayer(ctx, x, y, bank, t, shield, thrust) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(bank * 0.35);
+  // 1.5x sprite: the player must read at thumbnail size.
+  ctx.scale(1.5, 1.5);
   // Engine flames.
   if (thrust > 0.05) {
     const f = 10 + Math.sin(t * 40) * 4 + thrust * 8;
@@ -220,6 +222,19 @@ export function drawRing(ctx, x, y, r, t, passed) {
     ctx.moveTo(Math.cos(a) * (r - 4), Math.sin(a) * (r - 4));
     ctx.lineTo(Math.cos(a) * (r + 4), Math.sin(a) * (r + 4));
     ctx.stroke();
+  }
+  // Gold chevrons pointing inward — the mission-ring marker. Explosion
+  // rings are orange-red and spiky and never carry chevrons.
+  ctx.fillStyle = passed ? 'rgba(57,211,83,0.95)' : 'rgba(255,224,138,0.95)';
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * TAU + Math.PI / 4 + t * 0.4;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const px = -sa, py = ca; // perpendicular
+    ctx.beginPath();
+    ctx.moveTo(ca * (r - 2), sa * (r - 2));
+    ctx.lineTo(ca * (r + 10) + px * 7, sa * (r + 10) + py * 7);
+    ctx.lineTo(ca * (r + 10) - px * 7, sa * (r + 10) - py * 7);
+    ctx.closePath(); ctx.fill();
   }
   // Centre beacon.
   ctx.fillStyle = passed ? '#39d353' : '#ffe08a';

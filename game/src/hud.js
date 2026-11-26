@@ -120,7 +120,7 @@ function drawMiniPlane(ctx, x, y, color) {
   ctx.restore();
 }
 
-export function drawInstrumentStrip(ctx, s, W, H, t) {
+export function drawInstrumentStrip(ctx, s, W, H, t, staged = false) {
   const y0 = H - 88;
   ctx.fillStyle = 'rgba(6,18,36,0.94)';
   ctx.fillRect(0, y0, W, 88);
@@ -173,8 +173,12 @@ export function drawInstrumentStrip(ctx, s, W, H, t) {
   ctx.textAlign = 'right';
   ctx.fillStyle = AMBER; ctx.font = 'bold 12px sans-serif';
   ctx.fillText('KELANA-9  ·  LAUT BIRU CHAIN', W - 16, y0 + 24);
-  ctx.fillStyle = '#cfe6ff'; ctx.font = '11px sans-serif';
-  ctx.fillText('ARROWS / WASD fly  ·  Z / SPACE fire  ·  X bomb  ·  P pause  ·  M sound', W - 16, y0 + 44);
+  // Controls hint: live play only — in staged shots it is 11 px thumbnail
+  // noise, so it is dropped there.
+  if (!staged) {
+    ctx.fillStyle = '#cfe6ff'; ctx.font = '11px sans-serif';
+    ctx.fillText('ARROWS / WASD fly  ·  Z / SPACE fire  ·  X bomb  ·  P pause  ·  M sound', W - 16, y0 + 44);
+  }
   ctx.fillStyle = s.fuelLow ? '#ff5a4a' : '#9fd8ff';
   ctx.font = 'bold 12px sans-serif';
   ctx.fillText(s.fuelLow ? '⚠ FUEL LOW — FLY A RING TO REFUEL' : `FUEL ${Math.round(s.fuel)}%`, W - 16, y0 + 66);

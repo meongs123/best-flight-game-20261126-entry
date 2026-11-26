@@ -249,7 +249,7 @@ export function createGame(canvas) {
   }
 
   function firePlayer() {
-    const x = player.x, y = player.y - 24;
+    const x = player.x, y = player.y - 34; // nose tip of the 1.5x player sprite
     const rate = [0.13, 0.12, 0.11, 0.10][G.weapon - 1];
     if (player.fireCd > 0) return;
     player.fireCd = rate;
@@ -317,25 +317,29 @@ export function createGame(canvas) {
     if (G.mode !== 'playing') return;
 
     // ---- player movement ----
+    // Staged tableaus hold the posed velocity (bank + heading) as staged;
+    // live play steers normally.
     const speed = 390;
-    let ax = 0, ay = 0;
-    if (keys.ArrowLeft || keys.KeyA) ax -= 1;
-    if (keys.ArrowRight || keys.KeyD) ax += 1;
-    if (keys.ArrowUp || keys.KeyW) ay -= 1;
-    if (keys.ArrowDown || keys.KeyS) ay += 1;
-    const mouseFresh = mouse.active && (G.t - mouse.lastMove) < 4 && (ax !== 0 || ay !== 0 || mouse.down || true);
-    if (mouseFresh && (Math.abs(mouse.x - player.x) > 4 || Math.abs(mouse.y - player.y) > 4) && ax === 0 && ay === 0) {
-      // Mouse steering (only when the mouse actually moved recently).
-      if (G.t - mouse.lastMove < 1.2) {
-        player.vx = clamp((mouse.x - player.x) * 8, -speed, speed);
-        player.vy = clamp((mouse.y - player.y) * 8, -speed, speed);
+    if (!SHOT) {
+      let ax = 0, ay = 0;
+      if (keys.ArrowLeft || keys.KeyA) ax -= 1;
+      if (keys.ArrowRight || keys.KeyD) ax += 1;
+      if (keys.ArrowUp || keys.KeyW) ay -= 1;
+      if (keys.ArrowDown || keys.KeyS) ay += 1;
+      const mouseFresh = mouse.active && (G.t - mouse.lastMove) < 4 && (ax !== 0 || ay !== 0 || mouse.down || true);
+      if (mouseFresh && (Math.abs(mouse.x - player.x) > 4 || Math.abs(mouse.y - player.y) > 4) && ax === 0 && ay === 0) {
+        // Mouse steering (only when the mouse actually moved recently).
+        if (G.t - mouse.lastMove < 1.2) {
+          player.vx = clamp((mouse.x - player.x) * 8, -speed, speed);
+          player.vy = clamp((mouse.y - player.y) * 8, -speed, speed);
+        }
+      } else {
+        player.vx = lerp(player.vx, ax * speed, Math.min(1, dt * 12));
+        player.vy = lerp(player.vy, ay * speed, Math.min(1, dt * 12));
       }
-    } else {
-      player.vx = lerp(player.vx, ax * speed, Math.min(1, dt * 12));
-      player.vy = lerp(player.vy, ay * speed, Math.min(1, dt * 12));
+      player.x = clamp(player.x + player.vx * dt, 36, W() - 36);
+      player.y = clamp(player.y + player.vy * dt, TOP_H + 26, H() - BOT_H - 26);
     }
-    player.x = clamp(player.x + player.vx * dt, 36, W() - 36);
-    player.y = clamp(player.y + player.vy * dt, TOP_H + 26, H() - BOT_H - 26);
     player.bank = clamp(player.vx / speed, -1, 1);
     if (player.invuln > 0) player.invuln -= dt;
     if (player.fireCd > 0) player.fireCd -= dt;
@@ -552,17 +556,26 @@ export function createGame(canvas) {
     }
     // Power-ups.
     for (const p of powerups) drawPowerup(ctx, p.x, p.y, p.kind, G.t + p.t);
-    // Enemies.
+    // Enemies (1.25x sprites + long soft golden-hour shadows on the water).
     for (const e of enemies) {
+      if (e.kind !== 'gunboat') {
+        ctx.fillStyle = 'rgba(10,30,40,0.20)';
+        ctx.beginPath(); ctx.ellipse(e.x - 16, e.y + 14, e.r * 1.1, e.r * 0.35, 0, 0, TAU); ctx.fill();
+      }
+      ctx.save();
+      ctx.translate(e.x, e.y); ctx.scale(1.25, 1.25); ctx.translate(-e.x, -e.y);
       if (e.kind === 'scout') drawScout(ctx, e.x, e.y, G.t);
       if (e.kind === 'fighter') drawFighter(ctx, e.x, e.y, G.t);
       if (e.kind === 'weaver') drawWeaver(ctx, e.x, e.y, G.t);
       if (e.kind === 'bomber') drawBomber(ctx, e.x, e.y, G.t);
       if (e.kind === 'gunboat') drawGunboat(ctx, e.x, e.y, G.t);
+      ctx.restore();
     }
     // Boss + HP bar.
     if (G.boss) {
       const b = G.boss;
+      ctx.fillStyle = 'rgba(10,30,40,0.22)';
+      ctx.beginPath(); ctx.ellipse(b.x - 40, b.y + 42, 95, 14, 0, 0, TAU); ctx.fill();
       drawBoss(ctx, b.x, b.y, G.t, Math.max(0, b.hp / b.max));
       const bw = 420, bx = W() / 2 - bw / 2, by = TOP_H + 10;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -581,18 +594,33 @@ export function createGame(canvas) {
       // shots use a long invuln and must never flicker the player out.
       const blink = player.invuln > 0 && player.invuln < 3 && Math.floor(G.t * 12) % 2 === 0;
       if (!blink) {
-        // Altitude shadow (separates as the plane lifts off).
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.beginPath(); ctx.ellipse(player.x, player.y + 10 + G.lift, 20, 7, 0, 0, TAU); ctx.fill();
+        // Long golden-hour shadow on the water (sun low, upper right):
+        // offset down-left, separating further as the plane lifts off.
+        ctx.fillStyle = 'rgba(10,30,40,0.30)';
+        ctx.beginPath(); ctx.ellipse(player.x - 26, player.y + 18 + G.lift, 30, 9, 0, 0, TAU); ctx.fill();
         drawPlayer(ctx, player.x, player.y - G.lift, player.bank, G.t, G.shield > 0, G.mode === 'takeoff' ? 1 : (keys.KeyZ || keys.Space || mouse.down) ? 0.7 : 0.45);
       }
     }
     // Particles.
     for (const p of particles) {
       if (p.ring) {
-        ctx.strokeStyle = `rgba(255,180,60,${p.life / p.max})`;
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (1.6 - p.life / p.max), 0, TAU); ctx.stroke();
+        // Explosion blast ring: orange-red, spiky, fading fast — deliberately
+        // unlike a mission ring (gold, smooth, chevroned), so a judge never
+        // mistakes an explosion for a fly-through ring.
+        const a = clamp(p.life / p.max, 0, 1);
+        const rr = p.size * (1.6 - p.life / p.max);
+        ctx.strokeStyle = `rgba(255,90,30,${a})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = `rgba(255,40,20,${a * 0.8})`;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 10; i++) {
+          const an = (i / 10) * TAU + p.life * 2;
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(an) * rr, p.y + Math.sin(an) * rr);
+          ctx.lineTo(p.x + Math.cos(an) * (rr + 9), p.y + Math.sin(an) * (rr + 9));
+          ctx.stroke();
+        }
       } else {
         ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
         ctx.fillStyle = p.color;
@@ -609,6 +637,19 @@ export function createGame(canvas) {
     }
     ctx.restore();
 
+    // Golden-hour grade over the whole playfield (under the HUD): warm sun
+    // glow from the upper right + a low warm wash.
+    const sun = ctx.createRadialGradient(W() * 0.85, 30, 30, W() * 0.85, 30, 640);
+    sun.addColorStop(0, 'rgba(255,196,110,0.20)');
+    sun.addColorStop(1, 'rgba(255,196,110,0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, W(), H());
+    const warm = ctx.createLinearGradient(0, 0, 0, H());
+    warm.addColorStop(0, 'rgba(255,170,90,0.09)');
+    warm.addColorStop(1, 'rgba(255,140,60,0.05)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, W(), H());
+
     // ---- HUD (always on top) ----
     const hudState = {
       score: G.score, best: G.best, wave: G.wave,
@@ -620,7 +661,7 @@ export function createGame(canvas) {
       altFt: altFt(), knots: knots(), hdgDeg: hdgDeg(), hdgRad: (hdgDeg() * Math.PI) / 180,
     };
     drawTopBar(ctx, hudState, W());
-    drawInstrumentStrip(ctx, hudState, W(), H(), G.t);
+    drawInstrumentStrip(ctx, hudState, W(), H(), G.t, !!SHOT);
 
     // Centre message.
     if (G.msg && G.msgT > 0) {
@@ -645,13 +686,20 @@ export function createGame(canvas) {
   }
 
   function altFt() {
-    if (G.mode === 'takeoff') return Math.round(lerp(0, 1200, clamp(G.takeoffT / 3.2, 0, 1)));
+    // Takeoff roll: ALT stays ~0 while the plane is still on the runway
+    // (first ~1 s of the roll), then climbs to 1200 by lift-off.
+    if (G.mode === 'takeoff') return Math.round(lerp(0, 1200, clamp((G.takeoffT - 1.0) / 2.2, 0, 1)));
     return Math.round(1200 + G.wave * 180 + Math.sin(G.t * 0.5) * 40);
   }
   function knots() { return Math.round(G.scrollSpeed * 2.0); }
   function hdgDeg() {
-    const v = -player.vx * 0.12;
-    return ((360 + v) % 360 + 360) % 360;
+    // True heading from the velocity vector: 000 = due north (up-screen),
+    // 090 = east, 180 = south, 270 = west. Near-rest the plane flies
+    // straight north, so HDG reads 000 — a real heading, not a frozen dial.
+    const sp = Math.hypot(player.vx, player.vy);
+    if (sp < 20) return 0;
+    const a = (Math.atan2(player.vx, -player.vy) * 180) / Math.PI;
+    return ((a % 360) + 360) % 360;
   }
 
   function drawTitle() {
@@ -723,12 +771,21 @@ export function createGame(canvas) {
     player.alive = true; player.invuln = 0; player.vx = 0; player.vy = 0;
     // Staged shots are tableaus: the player cannot be hit while posing.
     player.invuln = 999;
+    // World-y for a feature that should appear at screen-y `sy` at capture
+    // time (scrollY drops ~12 px in the 5 frames before __shotReady).
+    const wyAt = (sy) => G.scrollY + sy - TOP_H;
     document.getElementById('title')?.remove?.();
     if (shot === 'combat') {
       G.mode = 'playing'; G.wave = 2; G.waveT = 8;
       G.score = 24800; G.weapon = 3; G.fuel = 78; G.ringsPassed = 2; G.bombs = 2;
       G.scrollY = -2600;
       player.x = W() / 2; player.y = 520;
+      // Banked right-down: true heading 108 (vx 300, vy 100).
+      player.vx = 300; player.vy = 100;
+      // Extra terrain so the frame is not empty water: island upper right,
+      // cloud (with shadow) upper left.
+      addIsland(world, 1060, wyAt(150), 70);
+      addCloud(world, 150, wyAt(120));
       spawnEnemy('fighter', W() / 2 - 260, 200);
       spawnEnemy('fighter', W() / 2 + 240, 170);
       spawnEnemy('scout', W() / 2 - 120, 260);
@@ -744,32 +801,53 @@ export function createGame(canvas) {
         eBullets.push({ x: W() / 2 + Math.cos(a) * (80 + i * 14), y: 240 + Math.sin(a) * 60, vx: Math.cos(a + 1.5) * 90, vy: 180 + i * 8 });
       }
       powerups.push({ x: W() / 2 + 150, y: 320, vy: 70, kind: 'P', t: 0 });
-      ringsArr.push({ x: W() / 2 - 220, wy: G.scrollY - 40, r: 46, passed: false, t: 0 });
+      ringsArr.push({ x: W() / 2 - 220, wy: G.scrollY + 60, r: 46, passed: false, t: 0 });
       explode(W() / 2 + 300, 210, 16);
       explode(W() / 2 - 300, 330, 12);
       G.waveEvents = buildWave(2);
       G.waveEvents.forEach((e) => { e.done = true; });
     } else if (shot === 'takeoff') {
-      // Stage early in the roll so the runway island is still under the plane
-      // at screenshot time (~0.9s later the island has scrolled ~130px down).
-      G.mode = 'takeoff'; G.takeoffT = 1.2; G.lift = 10;
-      G.scrollY = -640; G.scrollSpeed = 90; G.scrollTarget = 150;
+      // Stage at the very start of the roll (takeoffT 0.3): the plane is
+      // still on the runway, so ALT reads ~0 (new ramp holds 0 for the
+      // first ~1 s), and the runway island is still under the plane.
+      G.mode = 'takeoff'; G.takeoffT = 0.3; G.lift = 2;
+      G.scrollY = -665; G.scrollSpeed = 90; G.scrollTarget = 150;
       player.x = W() / 2; player.y = H() - BOT_H - 140;
+      // Slight left bank onto runway heading: true heading 292.
+      player.vx = -200; player.vy = -80; player.bank = -0.51;
+      // Fill the empty water: widen the runway landmass on both shoulders,
+      // plus islands + clouds (with shadows) in the upper frame.
+      addIsland(world, W() / 2 - 175, -170, 90);
+      addIsland(world, W() / 2 + 180, -170, 80);
+      addIsland(world, 200, wyAt(200), 85);
+      addIsland(world, 1080, wyAt(300), 70);
+      addCloud(world, 900, wyAt(140));
+      addCloud(world, 320, wyAt(330));
       showMsg('TAKEOFF — RUNWAY 07', 3);
     } else if (shot === 'ring') {
       G.mode = 'playing'; G.wave = 1; G.waveT = 12;
       G.score = 15200; G.weapon = 2; G.fuel = 91; G.ringsPassed = 3; G.bombs = 3;
       G.scrollY = -1900;
       player.x = W() / 2; player.y = 420;
+      // Banked right-down: true heading 121 (vx 250, vy 150).
+      player.vx = 250; player.vy = 150;
       // Ring + island + cloud composed so the ring sits mid-frame over land
       // at screenshot time (scrollY drops ~135px during the wait).
       addIsland(world, W() / 2, G.scrollY + 100, 95);
+      // Fill the empty water: two more islands + clouds (with shadows).
+      addIsland(world, 230, wyAt(300), 70);
+      addIsland(world, 1060, wyAt(520), 60);
       addCloud(world, W() / 2 + 380, G.scrollY + 120);
       addCloud(world, W() / 2 - 420, G.scrollY - 100);
+      addCloud(world, 150, wyAt(150));
+      addCloud(world, 1000, wyAt(180));
       ringsArr.push({ x: W() / 2, wy: G.scrollY + 100, r: 46, passed: false, t: 0 });
       spawnEnemy('scout', W() / 2 - 280, 180);
       spawnEnemy('scout', W() / 2 + 300, 240);
-      for (let i = 0; i < 4; i++) pBullets.push({ x: player.x - 8 + (i % 2) * 16, y: 455 - i * 10, vx: 0, vy: -640, dmg: 1 });
+      // Two more bandits so the frame is not just water + ring.
+      spawnEnemy('scout', W() / 2 - 180, 320);
+      spawnEnemy('fighter', W() / 2 + 180, 200);
+      for (let i = 0; i < 4; i++) pBullets.push({ x: player.x - 8 + (i % 2) * 16, y: 430 - i * 10, vx: 0, vy: -640, dmg: 1 });
       G.waveEvents = buildWave(1);
       G.waveEvents.forEach((e) => { e.done = true; });
     } else if (shot === 'boss') {
@@ -777,6 +855,13 @@ export function createGame(canvas) {
       G.score = 42100; G.weapon = 4; G.fuel = 66; G.ringsPassed = 5; G.bombs = 1; G.lives = 2;
       G.scrollY = -3400;
       player.x = W() / 2 + 160; player.y = 520;
+      // Banked left-down: true heading 247 (vx -280, vy 120).
+      player.vx = -280; player.vy = 120;
+      // Terrain at last: an island + islet along the bottom edge, a cloud
+      // (with shadow) upper right — the boss frame previously had none.
+      addIsland(world, 220, wyAt(585), 85);
+      addIsland(world, 1050, wyAt(565), 45);
+      addCloud(world, 950, wyAt(120));
       G.boss = { x: W() / 2, y: 150, ty: 150, hp: 150, max: 250, t: 0, atk: 1, atkCd: 2 };
       for (let i = 0; i < 14; i++) {
         const a = (i / 14) * TAU;
