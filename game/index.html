@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Kelana Strike — top-down air assault over the Laut Biru island chain</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #06283f; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #err { position: fixed; left: 8px; bottom: 8px; z-index: 99; color: #ffb0b0; font: 12px monospace;
+    background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 4px; display: none; }
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Kelana Strike: top-down shoot-em-up over the Laut Biru island chain. Arrows or WASD to fly, Z or Space to fire, X for bomb."></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+<div id="err"></div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
