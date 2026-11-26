@@ -15,7 +15,8 @@ function poly(ctx, pts, fill, stroke, lw = 1.5) {
 export function drawPlayer(ctx, x, y, bank, t, shield, thrust) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(bank * 0.35);
+  // Stronger bank + a subtle roll wobble so the plane never looks frozen.
+  ctx.rotate(bank * 0.5 + Math.sin(t * 2.2) * 0.03);
   // 1.5x sprite: the player must read at thumbnail size.
   ctx.scale(1.5, 1.5);
   // Engine flames.
@@ -166,6 +167,22 @@ export function drawBoss(ctx, x, y, t, hpFrac) {
   ctx.restore();
 }
 
+// ---- Birds: ambient flocks, small dark silhouettes, never enemies. ----
+export function drawBird(ctx, x, y, t, phase, scale = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+  const flap = Math.sin(t * 10 + phase);
+  ctx.strokeStyle = 'rgba(29,43,51,0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  // Body.
+  ctx.moveTo(-4, 0); ctx.lineTo(4, 0);
+  // Flapping wings.
+  ctx.moveTo(-2, 0); ctx.quadraticCurveTo(-7, -6 - flap * 4, -12, -8 - flap * 5);
+  ctx.moveTo(2, 0); ctx.quadraticCurveTo(7, -6 - flap * 4, 12, -8 - flap * 5);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // ---- Bullets, power-ups, rings.
 export function drawPlayerBullet(ctx, x, y) {
   const g = ctx.createLinearGradient(x, y - 9, x, y + 5);
@@ -202,10 +219,14 @@ export function drawPowerup(ctx, x, y, kind, t) {
 }
 export function drawRing(ctx, x, y, r, t, passed) {
   ctx.save(); ctx.translate(x, y);
-  const pulse = 1 + Math.sin(t * 3) * 0.04;
+  const pulse = 1 + Math.sin(t * 3) * 0.08;
   ctx.scale(pulse, pulse);
+  // Breathing outer halo (visual only — the chevroned ring itself is unchanged).
+  ctx.strokeStyle = passed ? `rgba(57,211,83,${0.12 + 0.08 * Math.sin(t * 3)})` : `rgba(255,176,46,${0.12 + 0.08 * Math.sin(t * 3)})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, r + 10, 0, TAU); ctx.stroke();
   ctx.shadowColor = passed ? '#39d353' : '#ffb02e';
-  ctx.shadowBlur = 22;
+  ctx.shadowBlur = 26;
   ctx.strokeStyle = passed ? '#39d353' : '#ffb02e';
   ctx.lineWidth = 7;
   ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.stroke();

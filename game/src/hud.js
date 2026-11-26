@@ -5,7 +5,7 @@ import { TAU, clamp } from './rng.js';
 const AMBER = '#ffc46b';
 const AMBER_DIM = '#e8a54b';
 
-function dial(ctx, cx, cy, r, label, valueText, frac, tickLabels) {
+function dial(ctx, cx, cy, r, label, valueText, frac, tickLabels, t) {
   ctx.save();
   ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 14;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
@@ -29,7 +29,7 @@ function dial(ctx, cx, cy, r, label, valueText, frac, tickLabels) {
       ctx.fillText(txt, cx + Math.cos(a) * (r - 26), cy + Math.sin(a) * (r - 26));
     }
   }
-  const na = (-0.75 + clamp(frac, 0, 1) * 1.5) * Math.PI;
+  const na = (-0.75 + clamp(frac, 0, 1) * 1.5) * Math.PI + Math.sin((t || 0) * 7 + cx * 0.01) * 0.012;
   ctx.shadowColor = '#ffcf7a'; ctx.shadowBlur = 8;
   ctx.beginPath(); ctx.moveTo(cx, cy);
   ctx.lineTo(cx + Math.cos(na) * (r - 14), cy + Math.sin(na) * (r - 14));
@@ -128,9 +128,9 @@ export function drawInstrumentStrip(ctx, s, W, H, t, staged = false) {
   ctx.fillRect(0, y0, W, 2);
   const cy = y0 + 40, r = 32;
   // Airspeed dial.
-  dial(ctx, 62, cy, r, 'AIRSPEED', `${Math.round(s.knots)}`, s.knots / 320, null);
+  dial(ctx, 62, cy, r, 'AIRSPEED', `${Math.round(s.knots)}`, s.knots / 320, null, t);
   // Altimeter dial.
-  dial(ctx, 158, cy, r, 'ALTITUDE', `${Math.round(s.altFt)}`, s.altFt / 3000, null);
+  dial(ctx, 158, cy, r, 'ALTITUDE', `${Math.round(s.altFt)}`, s.altFt / 3000, null, t);
   // Heading compass card.
   ctx.save();
   ctx.shadowColor = '#ffb347'; ctx.shadowBlur = 14;
@@ -179,7 +179,11 @@ export function drawInstrumentStrip(ctx, s, W, H, t, staged = false) {
     ctx.fillStyle = '#cfe6ff'; ctx.font = '11px sans-serif';
     ctx.fillText('ARROWS / WASD fly  ·  Z / SPACE fire  ·  X bomb  ·  P pause  ·  M sound', W - 16, y0 + 44);
   }
+  const fuelStr = s.fuelLow ? '⚠ FUEL LOW — FLY A RING TO REFUEL' : `FUEL ${Math.round(s.fuel)}%`;
   ctx.fillStyle = s.fuelLow ? '#ff5a4a' : '#9fd8ff';
   ctx.font = 'bold 12px sans-serif';
-  ctx.fillText(s.fuelLow ? '⚠ FUEL LOW — FLY A RING TO REFUEL' : `FUEL ${Math.round(s.fuel)}%`, W - 16, y0 + 66);
+  ctx.fillText(fuelStr, W - 16, y0 + 66);
+  // Blinking amber status dot just left of the FUEL readout.
+  ctx.fillStyle = `rgba(255,179,71,${0.4 + 0.6 * (Math.sin(t * 3) > 0 ? 1 : 0)})`;
+  ctx.beginPath(); ctx.arc(W - 16 - ctx.measureText(fuelStr).width - 12, y0 + 62, 4, 0, TAU); ctx.fill();
 }

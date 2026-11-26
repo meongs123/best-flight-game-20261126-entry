@@ -1,9 +1,9 @@
 // game.js — Kelana Strike: top-down vertical-scrolling shoot-em-up over the
 // Laut Biru island chain. Canvas 2D, all art procedural, no network requests.
 import { mulberry32, clamp, lerp, TAU } from './rng.js';
-import { createWorld, drawWorld, addIsland, addCloud } from './world.js';
+import { createWorld, drawWorld, drawForegroundClouds, addIsland, addCloud } from './world.js';
 import { drawPlayer, drawScout, drawFighter, drawWeaver, drawBomber, drawGunboat,
-  drawBoss, drawPlayerBullet, drawEnemyBullet, drawPowerup, drawRing } from './sprites.js';
+  drawBoss, drawPlayerBullet, drawEnemyBullet, drawPowerup, drawRing, drawBird } from './sprites.js';
 import { drawTopBar, drawInstrumentStrip } from './hud.js';
 
 const TOP_H = 64, BOT_H = 88;
@@ -46,6 +46,7 @@ export function createGame(canvas) {
     lift: 0,
     msg: null,
     msgT: 0,
+    birdT: 5,
   };
 
   const player = {
@@ -55,6 +56,7 @@ export function createGame(canvas) {
 
   let pBullets = [], eBullets = [], enemies = [], powerups = [], ringsArr = [];
   let particles = [], texts = [];
+  let birds = [], trail = [];
   let world = createWorld(1280, 7);
 
   // ---------------- audio (synthesised WebAudio, no files) ----------------
@@ -131,16 +133,58 @@ export function createGame(canvas) {
     texts.push({ x, y, txt, color, size, life: 1.1 });
   }
   function explode(x, y, n = 22, big = false) {
+    // Fire dots (as before).
     for (let i = 0; i < n; i++) {
       const a = rng() * TAU, sp = 40 + rng() * (big ? 260 : 150);
       particles.push({
-        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        kind: 'fire', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
         life: 0.5 + rng() * 0.6, max: 1.1,
         size: 2 + rng() * (big ? 7 : 4),
         color: ['#ffd23e', '#ff7b1c', '#ff5a3c', '#8a8a8a'][Math.floor(rng() * 4)],
       });
     }
-    particles.push({ x, y, vx: 0, vy: 0, life: 0.3, max: 0.3, size: big ? 46 : 26, color: 'ring', ring: true });
+    // Smoke: grey, rises and grows, lives 1.2–2.0 s (visible in staged shots).
+    const nSmoke = Math.round(n * (big ? 0.8 : 0.5));
+    for (let i = 0; i < nSmoke; i++) {
+      const a = rng() * TAU, sp = 20 + rng() * 60;
+      particles.push({
+        kind: 'smoke', x: x + (rng() - 0.5) * 10, y: y + (rng() - 0.5) * 10,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 30,
+        life: 1.2 + rng() * 0.8, max: 2.0,
+        size: 5 + rng() * 6, color: '#5a5a5a',
+      });
+    }
+    // Debris: dark chunks with strong gravity, spinning.
+    const nDebris = Math.round(n * 0.4);
+    for (let i = 0; i < nDebris; i++) {
+      const a = rng() * TAU, sp = 200 + rng() * 180;
+      particles.push({
+        kind: 'debris', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60,
+        life: 0.7 + rng() * 0.2, max: 0.9,
+        size: 2 + rng() * 2, color: ['#2a2a2a', '#3a2a1a'][Math.floor(rng() * 2)],
+        rot: rng() * TAU, vrot: (rng() - 0.5) * 12,
+      });
+    }
+    // Sparks: fast white-yellow streaks.
+    const nSparks = big ? 12 : 6;
+    for (let i = 0; i < nSparks; i++) {
+      const a = rng() * TAU, sp = 300 + rng() * 200;
+      particles.push({
+        kind: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 0.3 + rng() * 0.05, max: 0.35, size: 1.5, color: '#fff6c0',
+      });
+    }
+    // Core flash + spiky blast ring (life 0.5 s so it survives to __shotReady).
+    particles.push({ kind: 'flash', x, y, vx: 0, vy: 0, life: 0.12, max: 0.12, size: big ? 60 : 30, color: '#ffffff' });
+    particles.push({ x, y, vx: 0, vy: 0, life: 0.5, max: 0.5, size: big ? 46 : 26, color: 'ring', ring: true });
+  }
+  // Bullet-impact sparks: bright and brief, not a mini-explosion.
+  function sparkBurst(x, y) {
+    for (let i = 0; i < 6; i++) {
+      const a = rng() * TAU, sp = 300 + rng() * 200;
+      particles.push({ kind: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.3 + rng() * 0.05, max: 0.35, size: 1.5, color: '#fff6c0' });
+    }
+    particles.push({ kind: 'flash', x, y, vx: 0, vy: 0, life: 0.08, max: 0.08, size: 10, color: '#ffffff' });
   }
   function dropPowerup(x, y, force) {
     const roll = rng();
@@ -148,7 +192,7 @@ export function createGame(canvas) {
     powerups.push({ x, y, vy: 70, kind, t: 0 });
   }
   function spawnEnemy(kind, x, y, opts = {}) {
-    const base = { kind, x, y, t: rng() * 10, seed: rng() * 10, fireCd: 1 + rng(), ...opts };
+    const base = { kind, x, y, t: rng() * 10, seed: rng() * 10, fireCd: 1 + rng(), age: 0, ...opts };
     if (kind === 'scout') Object.assign(base, { hp: 1, r: 13, score: 100, vy: 130 });
     if (kind === 'fighter') Object.assign(base, { hp: 3, r: 20, score: 200, vy: 95 });
     if (kind === 'weaver') Object.assign(base, { hp: 2, r: 15, score: 150, vy: 210 });
@@ -156,6 +200,23 @@ export function createGame(canvas) {
     if (kind === 'gunboat') Object.assign(base, { hp: 4, r: 15, score: 250, vy: 0, wy: opts.wy ?? 0 });
     enemies.push(base);
   }
+  // Ambient bird flock: explicit placement for staged shots, random otherwise.
+  // Birds never collide, never shoot, never block — pure atmosphere.
+  function spawnFlock(x, y, dir, speed, n) {
+    const cx = x !== undefined ? x : (rng() < 0.5 ? -40 : W() + 40);
+    const cy = y !== undefined ? y : TOP_H + 90 + rng() * (H() - TOP_H - BOT_H - 350);
+    const d = dir !== undefined ? dir : (cx < 0 ? 1 : -1);
+    const sp = speed !== undefined ? speed : 70 + rng() * 50;
+    const count = n !== undefined ? n : 3 + Math.floor(rng() * 5);
+    for (let i = 0; i < count; i++) {
+      birds.push({
+        x: cx - d * i * (26 + rng() * 18),
+        y: cy + (rng() - 0.5) * 28,
+        dir: d, speed: sp, phase: rng() * TAU, scale: 0.7 + rng() * 0.6,
+      });
+    }
+  }
+
   function formation(type, cx, kind) {
     const y0 = 80;
     if (type === 'line') for (let i = 0; i < 5; i++) spawnEnemy(kind, clamp(cx - 160 + i * 80, 50, W() - 50), y0 - i * 26);
@@ -190,7 +251,7 @@ export function createGame(canvas) {
   }
 
   function startBoss() {
-    G.boss = { x: W() / 2, y: -90, ty: 150, hp: 220 + G.wave * 30, max: 220 + G.wave * 30, t: 0, atk: 0, atkCd: 2 };
+    G.boss = { x: W() / 2, y: -90, ty: 150, hp: 220 + G.wave * 30, max: 220 + G.wave * 30, t: 0, atk: 0, atkCd: 2, phase: 0, smokeT: 0 };
     G.bossWarn = 3;
     sfx.alarm();
     showMsg('!! BENTENG TERBANG — FLYING FORTRESS !!', 3);
@@ -200,9 +261,10 @@ export function createGame(canvas) {
     G.mode = 'takeoff';
     G.takeoffT = 0; G.lift = 0;
     G.score = 0; G.lives = 3; G.bombs = 3; G.weapon = 1; G.shield = 0; G.fuel = 100;
-    G.wave = 1; G.ringsPassed = 0; G.waveClear = 0; G.boss = null;
+    G.wave = 1; G.ringsPassed = 0; G.waveClear = 0; G.boss = null; G.birdT = 5;
     pBullets = []; eBullets = []; enemies = []; powerups = []; ringsArr = [];
-    particles = []; texts = [];
+    particles = []; texts = []; birds = []; trail = [];
+    player.alive = true; player.invuln = 2; player.vx = 0; player.vy = 0;
     world = createWorld(W(), 7);
     G.scrollY = -700; G.scrollSpeed = 0; G.scrollTarget = 150;
     player.x = W() / 2; player.y = H() - BOT_H - 92;
@@ -261,6 +323,8 @@ export function createGame(canvas) {
       mk(-10, 4, -130, -620); mk(10, 4, 130, -620);
     }
     if (G.weapon === 4) { mk(-16, 8, 0, -640); mk(16, 8, 0, -640); }
+    // Muzzle flash at the nose (visual only).
+    particles.push({ kind: 'flash', x, y, vx: 0, vy: 0, life: 0.1, max: 0.1, size: 14, color: '#ffffff' });
     sfx.shoot();
   }
 
@@ -269,6 +333,7 @@ export function createGame(canvas) {
     const d = Math.hypot(dx, dy) || 1;
     const sp = 230;
     eBullets.push({ x: e.x, y: e.y + 10, vx: (dx / d) * sp, vy: (dy / d) * sp });
+    particles.push({ kind: 'flash', x: e.x, y: e.y + 10, vx: 0, vy: 0, life: 0.08, max: 0.08, size: 8, color: '#ffffff' });
   }
 
   // ---------------- update ----------------
@@ -293,6 +358,17 @@ export function createGame(canvas) {
         ringsArr.push({ x: 140 + rng() * (W() - 280), wy: G.scrollY - 120, r: 46, passed: false, t: 0 });
       }
     }
+
+    // Ambient bird flocks (visual only — never collide, never shootable).
+    if (G.mode === 'playing') {
+      G.birdT -= dt;
+      if (G.birdT <= 0) {
+        G.birdT = 7 + rng() * 6;
+        spawnFlock();
+      }
+    }
+    for (const b of birds) b.x += b.dir * b.speed * dt;
+    birds = birds.filter((b) => b.x > -80 && b.x < W() + 80);
 
     if (G.mode === 'title') {
       G.attractT += dt;
@@ -339,6 +415,12 @@ export function createGame(canvas) {
       }
       player.x = clamp(player.x + player.vx * dt, 36, W() - 36);
       player.y = clamp(player.y + player.vy * dt, TOP_H + 26, H() - BOT_H - 26);
+      // Engine trail: record past positions (visual only).
+      const lastPt = trail[0];
+      if (!lastPt || Math.hypot(player.x - lastPt.x, player.y - lastPt.y) > 6) {
+        trail.unshift({ x: player.x, y: player.y + 18 });
+        if (trail.length > 14) trail.pop();
+      }
     }
     player.bank = clamp(player.vx / speed, -1, 1);
     if (player.invuln > 0) player.invuln -= dt;
@@ -372,6 +454,7 @@ export function createGame(canvas) {
     // ---- enemies ----
     for (const e of enemies) {
       e.t += dt;
+      e.age += dt;
       if (e.kind === 'gunboat') {
         e.y = e.wy - G.scrollY + TOP_H;
         e.fireCd -= dt;
@@ -394,6 +477,7 @@ export function createGame(canvas) {
             eBullets.push({ x: e.x - 10, y: e.y + 8, vx: -50, vy: 210 });
             eBullets.push({ x: e.x, y: e.y + 10, vx: 0, vy: 220 });
             eBullets.push({ x: e.x + 10, y: e.y + 8, vx: 50, vy: 210 });
+            particles.push({ kind: 'flash', x: e.x, y: e.y + 10, vx: 0, vy: 0, life: 0.08, max: 0.08, size: 10, color: '#ffffff' });
           }
         }
       }
@@ -416,6 +500,7 @@ export function createGame(canvas) {
             const dx = player.x - (b.x + sx), dy = player.y - (b.y + 20);
             const d = Math.hypot(dx, dy) || 1;
             eBullets.push({ x: b.x + sx, y: b.y + 20, vx: (dx / d) * 250, vy: (dy / d) * 250 });
+            particles.push({ kind: 'flash', x: b.x + sx, y: b.y + 20, vx: 0, vy: 0, life: 0.08, max: 0.08, size: 10, color: '#ffffff' });
           }
         } else if (b.atk === 1) {
           // Radial ring.
@@ -423,9 +508,34 @@ export function createGame(canvas) {
             const a = (i / 14) * TAU + b.t;
             eBullets.push({ x: b.x, y: b.y + 10, vx: Math.cos(a) * 150, vy: Math.sin(a) * 150 + 60 });
           }
+          particles.push({ kind: 'flash', x: b.x, y: b.y + 10, vx: 0, vy: 0, life: 0.1, max: 0.1, size: 16, color: '#ffffff' });
         } else {
           spawnEnemy('scout', clamp(b.x - 120, 60, W() - 60), b.y + 50);
           spawnEnemy('scout', clamp(b.x + 120, 60, W() - 60), b.y + 50);
+        }
+      }
+      // Boss phase-break FX + damage smoke (visual only — never touches HP).
+      if (b.hp > 0) {
+        const hpFrac = b.hp / b.max;
+        if (b.phase === 0 && hpFrac < 0.66) {
+          b.phase = 1;
+          explode(b.x - 50 + rng() * 100, b.y + (rng() - 0.5) * 40, 30, true);
+          G.shake = Math.max(G.shake, 12);
+        }
+        if (b.phase === 1 && hpFrac < 0.33) {
+          b.phase = 2;
+          explode(b.x - 50 + rng() * 100, b.y + (rng() - 0.5) * 40, 30, true);
+          G.shake = Math.max(G.shake, 12);
+        }
+        if (hpFrac < 0.66) {
+          b.smokeT += dt;
+          if (b.smokeT >= 0.09) {
+            b.smokeT = 0;
+            const nSm = hpFrac < 0.33 ? 2 : 1;
+            for (let i = 0; i < nSm; i++) {
+              particles.push({ kind: 'smoke', x: b.x - 50 + rng() * 100, y: b.y + (rng() - 0.5) * 40, vx: (rng() - 0.5) * 20, vy: -30 - rng() * 20, life: 1.2 + rng() * 0.6, max: 2.0, size: 5 + rng() * 5, color: '#5a5a5a' });
+            }
+          }
         }
       }
       if (b.hp <= 0) {
@@ -459,7 +569,7 @@ export function createGame(canvas) {
         const dx = b.x - e.x, dy = b.y - e.y;
         if (dx * dx + dy * dy < (e.r + 6) * (e.r + 6)) {
           b.dead = true;
-          explode(b.x, b.y, 3);
+          sparkBurst(b.x, b.y);
           // Staged shots are tableaus: bullets spark but never thin the cast.
           if (!SHOT) { e.hp -= b.dmg; if (e.hp <= 0) killEnemy(e); }
           break;
@@ -469,7 +579,7 @@ export function createGame(canvas) {
         const bb = G.boss;
         const dx = b.x - bb.x, dy = b.y - bb.y;
         if (Math.abs(dx) < 95 && dy > -45 && dy < 50) {
-          b.dead = true; explode(b.x, b.y, 3);
+          b.dead = true; sparkBurst(b.x, b.y);
           if (!SHOT) bb.hp -= b.dmg;
         }
       }
@@ -528,9 +638,13 @@ export function createGame(canvas) {
 
     // ---- particles / texts ----
     for (const p of particles) {
-      p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 30 * dt;
+      p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.kind === 'smoke') { p.vy -= 40 * dt; p.size += dt * 10; }
+      else if (p.kind === 'debris') { p.vy += 260 * dt; if (p.rot !== undefined) p.rot += (p.vrot || 0) * dt; }
+      else p.vy += 30 * dt;
     }
     particles = particles.filter((p) => p.life > 0);
+    if (particles.length > 600) particles.splice(0, particles.length - 600);
     for (const t of texts) { t.life -= dt; t.y -= 34 * dt; }
     texts = texts.filter((t) => t.life > 0);
   }
@@ -549,6 +663,8 @@ export function createGame(canvas) {
     ctx.save();
     if (G.shake > 0) ctx.translate((rng() - 0.5) * G.shake, (rng() - 0.5) * G.shake);
     drawWorld(ctx, world, G.scrollY, W(), H(), TOP_H, G.t);
+    // Ambient birds (background layer — never collide, never shootable).
+    for (const b of birds) drawBird(ctx, b.x, b.y, G.t, b.phase, b.scale);
     // Rings (under planes).
     for (const r of ringsArr) {
       const ry = r.wy - G.scrollY + TOP_H;
@@ -562,8 +678,25 @@ export function createGame(canvas) {
         ctx.fillStyle = 'rgba(10,30,40,0.20)';
         ctx.beginPath(); ctx.ellipse(e.x - 16, e.y + 14, e.r * 1.1, e.r * 0.35, 0, 0, TAU); ctx.fill();
       }
+      // Lateral velocity (same formulas as movement) drives bank + streak.
+      const latV = e.kind === 'scout' ? Math.sin(e.t * 2 + e.seed) * 55
+        : e.kind === 'weaver' ? Math.sin(e.t * 4.5 + e.seed) * 190
+        : e.kind === 'fighter' ? clamp(player.x - e.x, -1, 1) * 42 : 0;
+      // Motion streak behind the enemy (visual only; gunboats sit on the water).
+      if (e.kind !== 'gunboat') {
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(e.x, e.y - 12); ctx.lineTo(e.x - latV * 0.05, e.y - 30); ctx.stroke();
+      }
+      // Entrance fade-in + scale-in (visual only — movement/HP/fire untouched).
+      const fade = clamp((e.age || 0) / 0.4, 0, 1);
+      const grow = 0.8 + 0.2 * fade;
       ctx.save();
-      ctx.translate(e.x, e.y); ctx.scale(1.25, 1.25); ctx.translate(-e.x, -e.y);
+      ctx.translate(e.x, e.y);
+      ctx.rotate(clamp(latV / 190, -1, 1) * 0.18);
+      ctx.scale(1.25 * grow, 1.25 * grow);
+      ctx.translate(-e.x, -e.y);
+      ctx.globalAlpha = fade;
       if (e.kind === 'scout') drawScout(ctx, e.x, e.y, G.t);
       if (e.kind === 'fighter') drawFighter(ctx, e.x, e.y, G.t);
       if (e.kind === 'weaver') drawWeaver(ctx, e.x, e.y, G.t);
@@ -588,6 +721,18 @@ export function createGame(canvas) {
     // Bullets.
     for (const b of pBullets) drawPlayerBullet(ctx, b.x, b.y);
     for (const b of eBullets) drawEnemyBullet(ctx, b.x, b.y, G.t);
+    // Player engine trail (tapered amber ribbon through past positions).
+    if (trail.length > 1) {
+      for (let i = 0; i < trail.length - 1; i++) {
+        const a = 0.25 * (1 - i / 14);
+        ctx.strokeStyle = `rgba(255,180,80,${a})`;
+        ctx.lineWidth = Math.max(1, 10 * (1 - i / 14));
+        ctx.beginPath();
+        ctx.moveTo(trail[i].x, trail[i].y);
+        ctx.lineTo(trail[i + 1].x, trail[i + 1].y);
+        ctx.stroke();
+      }
+    }
     // Player (with takeoff shadow + invuln blink).
     if (G.mode !== 'gameover' && player.alive) {
       // Blink only during real post-hit invulnerability (short); staged
@@ -601,6 +746,8 @@ export function createGame(canvas) {
         drawPlayer(ctx, player.x, player.y - G.lift, player.bank, G.t, G.shield > 0, G.mode === 'takeoff' ? 1 : (keys.KeyZ || keys.Space || mouse.down) ? 0.7 : 0.45);
       }
     }
+    // Foreground edge clouds (slow, light veil over the playfield — never over the HUD).
+    drawForegroundClouds(ctx, world, G.t, W(), H());
     // Particles.
     for (const p of particles) {
       if (p.ring) {
@@ -621,7 +768,35 @@ export function createGame(canvas) {
           ctx.lineTo(p.x + Math.cos(an) * (rr + 9), p.y + Math.sin(an) * (rr + 9));
           ctx.stroke();
         }
+      } else if (p.kind === 'smoke') {
+        // Smoke: grey, soft, fading — size already grows in update().
+        ctx.globalAlpha = 0.35 * clamp(p.life / p.max, 0, 1);
+        ctx.fillStyle = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (p.kind === 'debris') {
+        // Debris: dark spinning chunks.
+        ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+        ctx.fillStyle = p.color;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot || 0);
+        ctx.fillRect(-p.size, -p.size / 2, p.size * 2, p.size);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      } else if (p.kind === 'spark') {
+        // Sparks: fast bright streaks.
+        ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+        ctx.strokeStyle = p.color; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x - p.vx * 0.03, p.y - p.vy * 0.03); ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else if (p.kind === 'flash') {
+        // Muzzle/explosion core flash.
+        ctx.globalAlpha = 0.9 * clamp(p.life / p.max, 0, 1);
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
       } else {
+        // Fire dots (as before).
         ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
         ctx.fillStyle = p.color;
         ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, TAU); ctx.fill();
@@ -764,7 +939,7 @@ export function createGame(canvas) {
   function stageShot(shot) {
     world = createWorld(W(), 7);
     pBullets = []; eBullets = []; enemies = []; powerups = []; ringsArr = [];
-    particles = []; texts = [];
+    particles = []; texts = []; birds = []; trail = [];
     G.score = 0; G.lives = 3; G.bombs = 3; G.weapon = 1; G.shield = 0; G.fuel = 100;
     G.ringsPassed = 0; G.boss = null; G.waveClear = 0;
     G.scrollY = -700; G.scrollSpeed = 150; G.scrollTarget = 150;
@@ -802,8 +977,10 @@ export function createGame(canvas) {
       }
       powerups.push({ x: W() / 2 + 150, y: 320, vy: 70, kind: 'P', t: 0 });
       ringsArr.push({ x: W() / 2 - 220, wy: G.scrollY + 60, r: 46, passed: false, t: 0 });
-      explode(W() / 2 + 300, 210, 16);
-      explode(W() / 2 - 300, 330, 12);
+      explode(W() / 2 + 300, 210, 34, true);
+      explode(W() / 2 - 300, 330, 28, true);
+      // Bird flock (upper left) so the sky reads alive in the combat shot.
+      spawnFlock(200, 150, 1, 90, 5);
       G.waveEvents = buildWave(2);
       G.waveEvents.forEach((e) => { e.done = true; });
     } else if (shot === 'takeoff') {
@@ -831,6 +1008,8 @@ export function createGame(canvas) {
       addIsland(world, 1080, wyAt(300), 70);
       addCloud(world, 900, wyAt(140));
       addCloud(world, 320, wyAt(330));
+      // Bird flock high in the frame (above the islands, clear of the runway).
+      spawnFlock(300, 140, 1, 80, 4);
       showMsg('TAKEOFF — RUNWAY 07', 3);
     } else if (shot === 'ring') {
       G.mode = 'playing'; G.wave = 1; G.waveT = 12;
@@ -855,6 +1034,8 @@ export function createGame(canvas) {
       // Two more bandits so the frame is not just water + ring.
       spawnEnemy('scout', W() / 2 - 180, 320);
       spawnEnemy('fighter', W() / 2 + 180, 200);
+      // Bird flock (mid-right), under the ring.
+      spawnFlock(1000, 260, -1, 85, 5);
       for (let i = 0; i < 4; i++) pBullets.push({ x: player.x - 8 + (i % 2) * 16, y: 430 - i * 10, vx: 0, vy: -640, dmg: 1 });
       G.waveEvents = buildWave(1);
       G.waveEvents.forEach((e) => { e.done = true; });
@@ -870,7 +1051,17 @@ export function createGame(canvas) {
       addIsland(world, 220, wyAt(585), 85);
       addIsland(world, 1050, wyAt(565), 45);
       addCloud(world, 950, wyAt(120));
-      G.boss = { x: W() / 2, y: 150, ty: 150, hp: 150, max: 250, t: 0, atk: 1, atkCd: 2 };
+      G.boss = { x: W() / 2, y: 150, ty: 150, hp: 150, max: 250, t: 0, atk: 1, atkCd: 2, phase: 1, smokeT: 0 };
+      // Boss is already past its first phase break at hp 0.6 — mark phase 1 so
+      // the live emitter does not fire a phantom explosion mid-capture.
+      // Pre-seed smoke on the hull: the emitter alone fires 0x in 5 frames.
+      // 10 puffs across the full hull width, larger than the emitter's, so the
+      // damage reads against the dark hull at capture (grey on brown is subtle).
+      for (let i = 0; i < 10; i++) {
+        particles.push({ kind: 'smoke', x: W() / 2 - 70 + rng() * 140, y: 150 + (rng() - 0.5) * 40, vx: (rng() - 0.5) * 20, vy: -30 - rng() * 20, life: 1.2 + rng() * 0.6, max: 2.0, size: 7 + rng() * 5, color: '#5a5a5a' });
+      }
+      // Bird flock (upper left, clear of the boss).
+      spawnFlock(500, 110, 1, 75, 3);
       for (let i = 0; i < 14; i++) {
         const a = (i / 14) * TAU;
         eBullets.push({ x: W() / 2, y: 190, vx: Math.cos(a) * 130, vy: Math.sin(a) * 130 + 60 });
@@ -880,6 +1071,10 @@ export function createGame(canvas) {
       G.waveEvents = buildWave(3);
       G.waveEvents.forEach((e) => { e.done = true; });
     }
+    // Staged enemies are fully faded in; ambient flocks are placed explicitly
+    // per shot above (the live spawn accumulator is parked past capture).
+    for (const e of enemies) e.age = 1;
+    G.birdT = 8;
     // Snap camera/scroll state so the first presented frame is the staged one.
     G.t = 5;
   }
